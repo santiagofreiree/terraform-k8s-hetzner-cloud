@@ -1,0 +1,93 @@
+- name: 02 - Install WireGuard and configure routing
+  hosts: vps
+  become: true
+  remote_user: "{{ ansible_user }}"
+ 
+  vars:
+    wg_network: "192.168.222.0/24"
+    hetzner_network: "10.0.0.0/16"
+    # Check your interface name with: ip -o link show | awk '{print $2}' | grep -v lo
+    wan_interface: "eth0"
+ 
+  tasks:
+ 
+    # ── 1. Install WireGuard ───────────────────────────────────────────────────
+    - name: Install WireGuard and tools
+      ansible.builtin.apt:
+        name:
+          - wireguard
+          - wireguard-tools
+          - iptables
+          - iptables-persistent
+        state: present
+        update_cache: true
+ 
+    # ── 2. Enable IP forwarding ───────────────────────────────────────────────
+    - name: Enable IPv4 forwarding (runtime)
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        state: present
+        sysctl_set: true
+        reload: true
+ 
+    - name: Persist IPv4 forwarding in /etc/sysctl.conf
+      ansible.builtin.lineinfile:
+        path: /etc/sysctl.conf
+        regexp: '^#?net.ipv4.ip_forward'
+        line: 'net.ipv4.ip_forward=1'
+        state: present
+ 
+    # ── 3. MASQUERADE for Hetzner internal network ────────────────────────────
+    - name: MASQUERADE - Hetzner internal (10.0.0.0/16)
+      ansible.builtin.iptables:
+        table: nat
+        chain: POSTROUTING
+        source: "{{ hetzner_network }}"
+        out_interface: "{{ wan_interface }}"
+        jump: MASQUERADE
+        comment: "Masquerade Hetzner internal"
+        state: present
+ 
+    # ── 4. MASQUERADE for WireGuard network ───────────────────────────────────
+    - name: MASQUERADE - WireGuard (10.8.0.0/24)
+      ansible.builtin.iptables:
+        table: nat
+        chain: POSTROUTING
+        source: "{{ wg_network }}"
+        out_interface: "{{ wan_interface }}"
+        jump: MASQUERADE
+        comment: "Masquerade WireGuard"
+        state: present
+ 
+    # ── 5. Allow FORWARD for both networks ────────────────────────────────────
+    - name: FORWARD - allow Hetzner internal traffic
+      ansible.builtin.iptables:
+        chain: FORWARD
+        source: "{{ hetzner_network }}"
+        jump: ACCEPT
+        comment: "Forward Hetzner internal"
+        state: present
+ 
+    - name: FORWARD - allow WireGuard traffic
+      ansible.builtin.iptables:
+        chain: FORWARD
+        source: "{{ wg_network }}"
+        jump: ACCEPT
+        comment: "Forward WireGuard"
+        state: present
+ 
+    - name: FORWARD - allow established/related returning traffic
+      ansible.builtin.iptables:
+        chain: FORWARD
+        ctstate:
+          - ESTABLISHED
+          - RELATED
+        jump: ACCEPT
+        comment: "Forward established/related"
+        state: present
+ 
+    # ── 6. Persist iptables rules across reboots ──────────────────────────────
+    - name: Save iptables rules (IPv4)
+      ansible.builtin.command: netfilter-persistent save
+      changed_when: true

@@ -1,0 +1,74 @@
+---
+- name: Configure Hetzner VPS - initial hardening
+  hosts: vps,internal,internal1
+  become: false
+  remote_user: root
+  gather_facts: false
+
+  vars:
+    new_user: "{{ bastion_user }}"
+    # Path to your LOCAL public key (on the machine running ansible)
+    local_pub_key: "~/.ssh/id_rsa.pub"
+
+  tasks:
+
+    # ── 1. Create the sudo user ────────────────────────────────────────────────
+    - name: Create user {{ new_user }}
+      ansible.builtin.user:
+        name: "{{ new_user }}"
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    # ── 2. Add your SSH public key to authorized_keys ─────────────────────────
+    - name: Add local id_rsa.pub to {{ new_user }} authorized_keys
+      ansible.posix.authorized_key:
+        user: "{{ new_user }}"
+        state: present
+        key: "{{ lookup('file', local_pub_key) }}"
+
+    # ── 3. Grant passwordless sudo ────────────────────────────────────────────
+    - name: Grant {{ new_user }} passwordless sudo
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/{{ new_user }}
+        content: "{{ new_user }} ALL=(ALL) NOPASSWD:ALL\n"
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
+
+    # ── 4. Harden SSH - disable root login ────────────────────────────────────
+    - name: Disable SSH root login
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+        state: present
+        backup: true
+      notify: Restart sshd
+
+    - name: Ensure password authentication is disabled
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        state: present
+      notify: Restart sshd
+
+    - name: Allow password authentication from local networks
+      ansible.builtin.blockinfile:
+        path: /etc/ssh/sshd_config
+        block: |
+          Match Address 10.0.0.0/16,10.8.0.0/24
+              PasswordAuthentication yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - Local network SSH"
+      notify: Restart sshd
+
+    # ── 5. Verify sshd config before restarting ───────────────────────────────
+    - name: Validate sshd config syntax
+      ansible.builtin.command: sshd -t
+      changed_when: false
+
+  handlers:
+    - name: Restart sshd
+      ansible.builtin.service:
+        name: ssh
+        state: restarted

@@ -1,0 +1,187 @@
+---
+- name: 04 - Configure Workers Nodes
+  hosts: internal
+  become: true
+  remote_user: sysmarket
+  gather_facts: true
+
+  vars:
+    k8s_version: "1.35"
+    calico_version: "v3.32.0"
+    pod_cidr: "10.244.0.0/16"
+    api_server_ip: "10.0.1.10"
+
+  tasks:
+    # ── 1. Configure Default Gateway ───────────────────────────────────────────
+    - name: Set default gateway to 10.0.0.1
+      ansible.builtin.command: ip route replace default via 10.0.0.1
+      changed_when: true
+
+    - name: Persist default gateway and DNS in netplan
+      ansible.builtin.copy:
+        dest: /etc/netplan/00-installer-config.yaml
+        content: |
+          network:
+            version: 2
+            ethernets:
+              eth0:
+                dhcp4: true
+                nameservers:
+                  addresses:
+                    - 8.8.8.8
+                    - 1.1.1.1
+                routes:
+                  - to: default
+                    via: 10.0.0.1
+      notify: Apply netplan
+
+    - name: Configure DNS nameservers immediately
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        content: |
+          nameserver 8.8.8.8
+          nameserver 1.1.1.1
+      changed_when: true
+
+    # ── 2. Install Prerequisites ───────────────────────────────────────────────
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - software-properties-common
+          - python3-pip
+        state: present
+        update_cache: true
+
+    # ── 3. Install Containerd ─────────────────────────────────────────────────
+    - name: Install containerd
+      ansible.builtin.apt:
+        name: containerd
+        state: present
+
+    - name: Create containerd config directory
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+
+    - name: Generate default containerd config
+      ansible.builtin.shell: containerd config default > /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Enable systemd cgroup driver for containerd
+      ansible.builtin.lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        line: 'SystemdCgroup = true'
+        state: present
+      notify: Restart containerd
+
+    - name: Start and enable containerd
+      ansible.builtin.systemd:
+        name: containerd
+        state: started
+        enabled: true
+
+    # ── 4. Install Kubernetes Packages ────────────────────────────────────────
+    - name: Add Kubernetes APT key
+      ansible.builtin.get_url:
+        url: https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key
+        dest: /tmp/kubernetes-release.key
+        mode: '0644'
+
+    - name: Create keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Dearmor Kubernetes key
+      ansible.builtin.command: gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/kubernetes-release.key
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+
+    - name: Add Kubernetes APT repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/ /"
+        state: present
+        filename: kubernetes
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Install Kubernetes components
+      ansible.builtin.apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+
+    - name: Hold Kubernetes packages
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Enable kubelet service
+      ansible.builtin.systemd:
+        name: kubelet
+        enabled: true
+
+    # ── 5. Disable Swap ────────────────────────────────────────────────────────
+    - name: Disable swap
+      ansible.builtin.command: swapoff -a
+      changed_when: true
+
+    - name: Remove swap from fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '^.*swap.*$'
+        state: absent
+
+    # ── 6. Load Kernel Modules ─────────────────────────────────────────────────
+    - name: Load kernel modules
+      ansible.builtin.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - overlay
+        - br_netfilter
+
+    - name: Persist kernel modules
+      ansible.builtin.lineinfile:
+        path: /etc/modules-load.d/k8s.conf
+        line: "{{ item }}"
+        create: true
+      loop:
+        - overlay
+        - br_netfilter
+
+    - name: Set sysctl parameters for Kubernetes
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_set: true
+        reload: true
+      loop:
+        - { key: "net.bridge.bridge-nf-call-iptables", value: "1" }
+        - { key: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
+        - { key: "net.ipv4.ip_forward", value: "1" }
+
+  handlers:
+    - name: Restart containerd
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted
