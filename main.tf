@@ -88,8 +88,7 @@ resource "hcloud_server" "worker1" {
   }
 
   public_net {
-    ipv4_enabled = true
-    ipv4         = var.primary_ip_id
+    ipv4_enabled = false
     ipv6_enabled = false
   }
 

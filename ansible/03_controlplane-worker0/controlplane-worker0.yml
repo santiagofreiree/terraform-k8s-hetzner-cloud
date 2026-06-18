@@ -377,6 +377,29 @@
 
   tasks:
 
+    # ── 1. Default gateway  ───────────────────────────────────────────────
+
+    - name: Set default gateway to 10.0.0.1
+      ansible.builtin.command: ip route replace default via 10.0.0.1
+      changed_when: true
+
+    - name: Persist default gateway and DNS in netplan
+      ansible.builtin.copy:
+        dest: /etc/netplan/00-installer-config.yaml
+        content: |
+          network:
+            version: 2
+            ethernets:
+              enp7s0:
+                dhcp4: true
+                nameservers:
+                  addresses:
+                    - 8.8.8.8
+                    - 1.1.1.1
+                routes:
+                  - to: default
+                    via: 10.0.0.1
+
     # ── 2. Install Prerequisites ───────────────────────────────────────────────
     - name: Install prerequisite packages
       ansible.builtin.apt:

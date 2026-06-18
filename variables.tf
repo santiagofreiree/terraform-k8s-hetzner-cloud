@@ -40,13 +40,6 @@ variable "ssh_private_key_path" {
   default     = null
 }
 
-variable "domain" {
-  description = "Domain name"
-  type        = string
-  default     = "default.sysmarketsa.com"
-
-}
-
 variable "cluster_name" {
   description = "Name of the Cluster"
   type        = string
