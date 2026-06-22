@@ -46,7 +46,7 @@ resource "hcloud_network_subnet" "subnet" {
 # Server resource - Router and NFS Gateway
 resource "hcloud_server" "worker0" {
   name        = "worker0"
-  server_type = "cx33"
+  server_type = "cx23"
   image       = "ubuntu-26.04"
   location    = var.location
   ssh_keys    = [hcloud_ssh_key.default.id]
@@ -76,38 +76,6 @@ resource "hcloud_server" "worker0" {
 
 }
 
-# Server resource - worker1
-resource "hcloud_server" "worker1" {
-  name        = "worker1"
-  server_type = "cx33"
-  image       = "ubuntu-26.04"
-  location    = var.location
-  ssh_keys    = [hcloud_ssh_key.default.id]
-  labels = {
-    role = "worker1"
-  }
-
-  public_net {
-    ipv4_enabled = false
-    ipv6_enabled = false
-  }
-
-  network {
-    network_id = hcloud_network.private.id
-    ip         = cidrhost(var.subnet_cidr, 21)
-  }
-
-  depends_on = [hcloud_network_subnet.subnet]
-
-  lifecycle {
-    ignore_changes = [
-      user_data,
-    ]
-  }
-}
-
-
-# Control Plane Server with Kubernetes
 
 # Control Plane Server with Kubernetes
 resource "hcloud_server" "control_plane" {

@@ -3,16 +3,6 @@
 # Note: HCLOUD_TOKEN is read from environment variable automatically by the provider
 # export HCLOUD_TOKEN="your-token-here"
 
-variable "volume_id" {
-  description = "ID of the existing volume to attach"
-  type        = string
-
-  validation {
-    condition     = can(regex("^[0-9]+$", var.volume_id))
-    error_message = "Volume ID must be a numeric value."
-  }
-}
-
 variable "primary_ip_id" {
   description = "ID of the existing primary IP"
   type        = string

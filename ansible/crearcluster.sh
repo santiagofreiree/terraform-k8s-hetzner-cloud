@@ -12,4 +12,4 @@ ansible-playbook -i inventory.ini 02_natworker0/base.yml
 ansible-playbook -i inventory.ini 03_controlplane-worker0/controlplane-worker0.yml
 
 #Install kubeadmin and configure worker1
-ansible-playbook -i inventory.ini 04_worker1/worker1.yml
+#ansible-playbook -i inventory.ini 04_worker1/worker1.yml
