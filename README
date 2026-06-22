@@ -1,0 +1,95 @@
+SECURE AND COST-EFFECTIVE KUBERNETES PRODUCTION CLUSTER
+
+Secure and cost-effective Kubernetes production cluster using Terraform, Ansible, and kubeadm.
+The architecture is carefully designed to scale with your business. You can start with one or two customers and gradually grow to hundreds without redesigning the platform.
+
+DIAGRAM:
+
+                                    🌍 Internet
+                                         │
+                                         │ HTTPS / HTTP
+                                         ▼
+                        ┌──────────────────────────────┐
+                        │      Hetzner Load Balancer   │
+                        │            🌐 Public IP      │
+                        └──────────────┬───────────────┘
+                                       │
+                                       ▼
+                    ┌────────────────────────────────────────────┐
+                    │      Traefik Gateway API Controller        │
+                    │                    🚦                      │
+                    │     Kubernetes Gateway / HTTPRoutes        │
+                    └──────────────────┬─────────────────────────┘
+                                       │
+═══════════════════════════════════════╪═══════════════════════════════════════
+            Hetzner Private Network    │          10.0.1.0/24
+═══════════════════════════════════════╪═══════════════════════════════════════
+                                       │
+           ┌───────────────────────────┼───────────────────────────┐
+           │                           │                           │
+           ▼                           ▼                           ▼
+
+               ┌────────────────┐            ┌────────────────┐
+               │ 🎛️ Control-01  │            │ ⚙️ Worker-02    │
+               │ 10.0.1.10      │            │ 10.0.1.21      │
+               │ No Public IP   │            │ No Public IP   │
+               │ K8s API Server │            │ Pods           │
+               └────────────────┘            └────────────────┘
+
+                            ┌────────────────┐
+                            │ ⚙️ Worker-0     │
+                            │ 10.0.1.2       │
+                            │ PUBLIC IP      │
+                            │ Pods           │
+                            │🔐NAT/Gateway   │
+                            │🔒WireGuard VPN │
+                            │🚪Adm EntryPoint│
+                            └────────────────┘
+           ▲                           ▲                           ▲
+           │                           │Firewall (only vpn)        │
+           └────────────── Kubernetes Cluster ─────────────────────┘
+                                       │
+                                       ▼
+                                  🌍 Internet
+
+Control Plane and Worker 1 do not have public IP addresses. Instead, they access the Internet through a NAT Gateway VPS, which initially also serves as Worker 0 to reduce infrastructure costs. An external load balancer exposes applications and services to the Internet.
+The NAT Gateway is also configured with WireGuard, allowing administrators to securely manage the cluster using kubectl through a private VPN connection. A firewall restricts public access so that only the WireGuard port is exposed on the NAT Gateway's public IP address.
+This architecture has been tested and successfully used in production environments. When additional capacity is required, Worker 0 or Worker 1 can be drained and replaced with minimal disruption.
+
+INSTALLATION:
+
+You can set up the cluster in a few minutes:
+
+1. The code is programmed to use a public IP created in Hetzner, so you can run terraform apply and terraform destroy while retaining the public IP. Therefore, it is necessary to set up the public IP and obtain its ID. This can be done easily using the CLI with the hcloud program.
+2. You have to edit two files: terraform.tfvar and ansible/group_vars/all.yml. In these files, you configure the following: the ID of the public IP, the public IP itself, the location, and the name of the cluster.
+3. Run terraform init, terraform plan, and terraform apply.
+4. Run ansible/crearcluster.sh.
+
+That's all. You can access the Kubernetes cluster with:
+
+ssh -J myuser@IPPUBLICA myuser@10.0.1.10
+
+Root access is blocked for security reasons, so you must log in using myuser. The k alias for kubectl and autocomplete are also created with Ansible. Metrics using kubectl top are also enabled.
+
+OTHER STAGES:
+STAGE 2
+As the number of customers grows, it is recommended to add a dedicated worker node and remove the NAT Gateway VPS from the Kubernetes cluster. This migration is straightforward: simply drain Worker 0 and remove it from the cluster. The architecture then evolves into the configuration shown below.
+
+STAGE 3
+As your startup continues to grow, high availability becomes necessary for the control plane. To achieve this, add a VPS running HAProxy (or NGINX) to load balance traffic across three control plane nodes. Worker nodes should then be reconfigured to connect to the Kubernetes API through a virtual endpoint (for example, 10.0.1.100). This change should be performed gradually by draining and updating each worker node individually.
+The final architecture is shown below.
+
+STAGE 4
+At a later stage, the platform can be further enhanced with redundant NAT Gateways and multiple HAProxy instances, providing additional resilience and eliminating single points of failure.
+
+The Terraform and Ansible code for this project is available in my LinkedIn Projects section.
+
+The automation includes:
+• Kubernetes cluster provisioning with kubeadm
+• Calico networking configuration
+• Metrics Server deployment
+• Secure WireGuard VPN access
+• Firewall configuration
+• Shell aliases and kubectl auto-completion setup
+• Automated infrastructure deployment using Terraform and Ansible
+This project demonstrates how startups can deploy a production-ready Kubernetes platform with strong security, low operational costs, and a clear path to scale.
